@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MTracker CAR — instrukcja kalibracji skrętu</title>
+<style>
+body{font:16px/1.65 system-ui,sans-serif;max-width:1050px;margin:40px auto;padding:0 24px;color:#172130;background:#fff}
+h1,h2,h3{line-height:1.25}h1{font-size:2.2rem}h2{margin-top:2.5rem;border-bottom:1px solid #d7dfe8;padding-bottom:.5rem}h3{margin-top:1.7rem}
+a{color:#1559a2}pre{background:#f2f5f8;border:1px solid #d7dfe8;border-radius:6px;padding:16px;overflow:auto;line-height:1.5}
+code{font-family:ui-monospace,monospace;font-size:.9em}p code,li code,td code{background:#f2f5f8;padding:.1em .25em;border-radius:3px}
+table{border-collapse:collapse;width:100%;font-size:.92em;margin:1rem 0}th,td{border:1px solid #d7dfe8;padding:10px;text-align:left;vertical-align:top}th{background:#edf2f7}tr:nth-child(even){background:#fafbfd}
+@media print{body{max-width:none;margin:0;font-size:10pt;padding:0}pre{white-space:pre-wrap}h2,h3{break-after:avoid}tr,pre{break-inside:avoid}a{color:inherit;text-decoration:none}}
+</style></head><body>
+<h1>MTracker CAR — instrukcja kalibracji skrętu</h1>
+<p>Instrukcja obsługi modułu <code>steering_calibration</code> w pakiecie ROS 2 <code>mtrackercar</code>.</p>
+<p>Ustawianie parametrów regulatora napędu opisuje osobna
+<a href="regulator_manual_pl.html">instrukcja regulatora</a>
+(<a href="regulator_manual_pl.html">wersja HTML</a>).</p>
+<h2>1. Co wyznacza program</h2>
+<p>Program identyfikuje zależność między rzeczywistym kątem skrętu przednich kół a surowym sterowaniem serwem:</p>
+<pre><code class="language-text">rawServo = c0 + c1·a + c2·a² + c3·a³
+</code></pre>
+<p><code>a</code> oznacza kąt w radianach, a <code>rawServo</code> jest bezwymiarową nastawą serwa. Wynikiem są cztery współczynniki <code>c0, c1, c2, c3</code> zgodne z kalibracją firmware <code>CAR_VEHICLE</code>.</p>
+<p>Podczas pomiaru robot powoli jedzie do przodu i do tyłu przy różnych nastawach serwa. Moduł rejestruje <strong>pozycję x, y i orientację theta z odom</strong>. Nie potrzebuje osobnych prędkości tylnych kół.</p>
+<p>Z kolejnych pozycji wyznacza drogę ze znakiem, a ze zmian orientacji — krzywiznę toru. Następnie oblicza kąt skrętu z modelu rowerowego:</p>
+<pre><code class="language-text">krzywizna = zmiana orientacji / droga ze znakiem
+kąt skrętu = atan(rozstaw osi · krzywizna)
+</code></pre>
+<p>W implementacji krzywizna jest dopasowywana do całej serii pomiarowej, z odpornym ważeniem błędów. Odwijanie orientacji pozwala przechodzić przez granicę ±pi. Dla jazdy do tyłu droga ma znak ujemny, dzięki czemu ten sam skręt daje ten sam zidentyfikowany kąt.</p>
+<p><strong>Warunek pomiaru:</strong> odom musi opisywać rzeczywisty ruch robota, np. wyliczony z pomiarów obu tylnych kół. Odometria integrowana wyłącznie z zadanych komend nie pozwala wyznaczyć rzeczywistej charakterystyki serwa. Wynik zależy również od poprawności geometrii odometrii i poślizgu.</p>
+<h2>2. Przygotowanie środowiska</h2>
+<p>Polecenia poniżej zakładają workspace <code>/home/student/ros2_workspace</code> i ROS 2 Jazzy.</p>
+<p>W pierwszym terminalu:</p>
+<pre><code class="language-bash">cd /home/student/ros2_workspace
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-up-to mtrackercar --symlink-install
+source install/setup.bash
+</code></pre>
+<p>Po aktualizacji kodu zakończ poprzedni launch i uruchom go ponownie.
+Już działający proces sterownika nie przejmuje nowej wersji po przebudowie.</p>
+<p>W każdym kolejnym terminalu załaduj środowisko:</p>
+<pre><code class="language-bash">cd /home/student/ros2_workspace
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+</code></pre>
+<p>Zależności modułu obejmują <code>rclpy</code>, NumPy, PyYAML i Matplotlib. Firmware musi obsługiwać nowy protokół CAR: <code>CMD=5</code> z żądaniem <code>LEN=20</code>, odpowiedzią <code>LEN=22</code> i kalibracją <code>CMD=13</code>.</p>
+<p>Zatrzymaj wcześniej uruchomiony sterownik, symulator, joystick i kontrolery jazdy. Launch kalibracji uruchamia własny sterownik. Robot powinien stać na podłożu pozwalającym mierzyć ruch; napęd i serwo będą aktywowane podczas pomiarów. Zapewnij miejsce na przejazdy i możliwość zatrzymania robota. Program nie wykrywa przeszkód.</p>
+<h2>3. Sprawdzenie konfiguracji</h2>
+<h3>Sterownik: <code>config/mtrackercar.yaml</code></h3>
+<p>Sprawdź przede wszystkim:</p>
+<table>
+<thead>
+<tr>
+<th>Parametr</th>
+<th>Znaczenie</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>serial_port</code></td>
+<td>Port robota, domyślnie <code>/dev/ttyUSB0</code>.</td>
+</tr>
+<tr>
+<td><code>baud_rate</code></td>
+<td>Prędkość transmisji, domyślnie <code>921600</code>.</td>
+</tr>
+<tr>
+<td><code>robot_address</code></td>
+<td>Jednobajtowy numer robota zgodny z firmware, <code>0…255</code>. Stara wartość <code>256</code> jest nieprawidłowa.</td>
+</tr>
+<tr>
+<td><code>enable_drive</code></td>
+<td>Musi być <code>true</code>, żeby wykonać przejazdy.</td>
+</tr>
+<tr>
+<td><code>wheel_radius</code></td>
+<td>Promień napędzanego koła w metrach.</td>
+</tr>
+<tr>
+<td><code>wheel_base</code></td>
+<td>Efektywny wzdłużny rozstaw osi modelu rowerowego w metrach.</td>
+</tr>
+</tbody>
+</table>
+<h3>Identyfikacja: <code>config/calibration.yaml</code></h3>
+<p><code>wheel_radius</code> i <code>wheel_base</code> muszą odpowiadać wartościom używanym dla tego samego robota. <code>wheel_base</code> oznacza odległość wzdłużną między osiami, a nie rozstaw lewego i prawego tylnego koła.</p>
+<table>
+<thead>
+<tr>
+<th>Parametr</th>
+<th>Domyślnie</th>
+<th>Znaczenie</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>speed</code></td>
+<td><code>0.05</code></td>
+<td>Wartość prędkości jazdy w m/s; moduł i sterownik ograniczają kalibrację do <code>0.10 m/s</code>.</td>
+</tr>
+<tr>
+<td><code>raw_values</code></td>
+<td>13 wartości od <code>-1.00</code> do <code>+1.00</code></td>
+<td>Badane nastawy serwa. Co najmniej 5 różnych wartości obejmujących oba znaki; zakres programu <code>[-1.0, 1.0]</code>. Dobierz nastawy do mechaniki robota.</td>
+</tr>
+<tr>
+<td><code>repeats</code></td>
+<td><code>3</code></td>
+<td>Liczba powtórzeń pełnego zestawu; minimum <code>2</code>.</td>
+</tr>
+<tr>
+<td><code>pause_duration</code></td>
+<td><code>1.0 s</code></td>
+<td>Postój między odcinkami, z ustawioną nastawą serwa kolejnego odcinka.</td>
+</tr>
+<tr>
+<td><code>settle_duration</code></td>
+<td><code>1.5 s</code></td>
+<td>Jazda pozwalająca ustalić skręt przed pomiarem.</td>
+</tr>
+<tr>
+<td><code>measure_duration</code></td>
+<td><code>8.0 s</code></td>
+<td>Czas rejestracji pojedynczego odcinka.</td>
+</tr>
+<tr>
+<td><code>min_distance</code></td>
+<td><code>0.15 m</code></td>
+<td>Minimalna zmierzona droga odcinka.</td>
+</tr>
+<tr>
+<td><code>pose_timeout</code></td>
+<td><code>0.3 s</code></td>
+<td>Maksymalny dopuszczalny wiek/przerwa pomiarów pozycji.</td>
+</tr>
+<tr>
+<td><code>max_radius</code></td>
+<td><code>2.0 m</code></td>
+<td>Maksymalna odległość od pozycji startowej według odom.</td>
+</tr>
+<tr>
+<td><code>max_total_distance</code></td>
+<td><code>40.0 m</code></td>
+<td>Limit sumarycznej przebytej drogi, również poza fazą pomiaru.</td>
+</tr>
+<tr>
+<td><code>max_duration</code></td>
+<td><code>900 s</code></td>
+<td>Limit czasu całego przebiegu.</td>
+</tr>
+<tr>
+<td><code>max_yaw_rms</code></td>
+<td><code>0.025 rad</code></td>
+<td>Limit błędu modelu stałej krzywizny pojedynczego odcinka.</td>
+</tr>
+<tr>
+<td><code>max_fit_rmse</code></td>
+<td><code>0.04</code></td>
+<td>Limit RMSE wielomianu w jednostkach <code>rawServo</code>.</td>
+</tr>
+<tr>
+<td><code>max_direction_difference</code></td>
+<td><code>0.06 rad</code></td>
+<td>Limit różnicy średnich kątów przód–tył dla tej samej nastawy.</td>
+</tr>
+<tr>
+<td><code>seed</code></td>
+<td><code>7</code></td>
+<td>Ziarno losowania kolejności nastaw.</td>
+</tr>
+</tbody>
+</table>
+<h3>Większa liczba przejazdów</h3>
+<p>Liczba odcinków wynosi:</p>
+<pre><code class="language-text">liczba nastaw × 2 kierunki × liczba powtórzeń
+</code></pre>
+<p>Domyślnie: <code>13 × 2 × 3 = 78</code> odcinki, około <strong>13 min 39 s</strong> bez dodatkowych opóźnień. Droga faz pomiarowych wynosi około <code>31.2 m</code>, a łącznie z ustalaniem skrętu około <code>37.05 m</code>.</p>
+<p>Dla <strong>130 odcinków</strong> zmień w <code>calibration.yaml</code>:</p>
+<pre><code class="language-yaml">repeats: 5
+max_duration: 1500.0
+max_total_distance: 70.0
+</code></pre>
+<p>Przy pozostałych domyślnych ustawieniach potrwa to około <strong>22 min 45 s</strong>, a droga wyniesie około <code>61.75 m</code>. Zwiększenie liczby powtórzeń wymaga dostosowania limitów czasu i drogi. Limit promienia przestrzeni dobierz osobno do dostępnego miejsca.</p>
+<p>Podczas pierwszego powtórzenia nastawy rosną, podczas drugiego maleją, a od trzeciego ich kolejność jest tasowana. Dla każdej nastawy wykonywana jest para przód–tył; kolejność kierunków zmienia się między powtórzeniami.</p>
+<h2>4. Uruchomienie pomiarów</h2>
+<p>W pierwszym terminalu:</p>
+<pre><code class="language-bash">ros2 launch mtrackercar calibration.launch.py enable_motion:=true
+</code></pre>
+<p>Sam launch <strong>nie rozpoczyna przejazdów</strong>. Sterownik pracuje w trybie <code>command_source=calibration_raw</code>, a moduł czeka na usługę startową, świeżą pozycję oraz potwierdzoną komunikację szeregową.</p>
+<p>W tym launchu sterownik publikuje odometrię na <strong><code>odom</code></strong>, a moduł wykorzystuje z niej pozycję i orientację. Nie uruchamiaj drugiego sterownika publikującego na ten sam temat.</p>
+<p>W drugim terminalu sprawdź dane:</p>
+<pre><code class="language-bash">ros2 topic echo /odom --once
+ros2 topic echo /diagnostics --once
+</code></pre>
+<p>Odometria <code>nav_msgs/msg/Odometry</code> powinna mieć aktualny znacznik czasu, poprawną orientację oraz nazwy układu odniesienia i układu robota. Diagnostyka <code>mtrackercar/serial</code> powinna wskazywać potwierdzoną komunikację.</p>
+<p>Rozpocznij przebieg:</p>
+<pre><code class="language-bash">ros2 service call /steering_calibration/start std_srvs/srv/Trigger '{}'
+</code></pre>
+<p>Oczekiwane potwierdzenie to <code>success: true</code> i ścieżka katalogu wynikowego. Od tej chwili robot wykonuje sekwencję jazdy.</p>
+<p>Podgląd postępu:</p>
+<pre><code class="language-bash">ros2 topic echo /calibration/status
+</code></pre>
+<p>Komunikaty zawierają numer odcinka, fazę <code>pause</code>, <code>settle</code> lub <code>measure</code>, nastawę serwa i kierunek (<code>+1</code>: przód, <code>-1</code>: tył).</p>
+<p>Pierwszy odcinek domyślnej sekwencji ma <code>raw=-1.00</code> i <code>direction=+1</code>,
+więc robot powinien jechać do przodu. Sterownik wysyła prędkość napędu ze znakiem
+zadanej komendy, bez dodatkowej negacji. Zgodność kierunku fizycznego i odometrii
+wymaga sprawdzenia na robocie.</p>
+<h3>Zatrzymanie i anulowanie</h3>
+<pre><code class="language-bash">ros2 service call /steering_calibration/cancel std_srvs/srv/Trigger '{}'
+</code></pre>
+<p>Moduł zadaje zerową prędkość i zapisuje pomiary oraz raport częściowy. Komenda zatrzymania jest wysyłana przed generowaniem wykresów. Po zaniku komend sterownik ma dodatkowo własny timeout.</p>
+<p>Nie zmieniaj kalibracji firmware, nie resetuj odometrii i nie uruchamiaj innych źródeł surowych komend podczas pomiaru. Tryb kalibracyjny sterownika ignoruje <code>cmd_vel</code>, lecz nadal przyjmuje wiadomości na <code>calibration/raw_command</code>.</p>
+<h2>5. Własne pliki i inne źródło odom</h2>
+<p>Możesz wskazać konkretne pliki konfiguracyjne oraz bezwzględny katalog wyników:</p>
+<pre><code class="language-bash">ros2 launch mtrackercar calibration.launch.py \
+  config:=/home/student/ros2_workspace/src/MTrackerCar-ROS/config/mtrackercar.yaml \
+  calibration_config:=/home/student/ros2_workspace/src/MTrackerCar-ROS/config/calibration.yaml \
+  output_dir:=/home/student/ros2_workspace/calibration_results \
+  enable_motion:=true
+</code></pre>
+<p>Jeżeli właściwy pomiar <code>nav_msgs/Odometry</code> pochodzi z innego tematu, np. <code>/measured_odom</code>:</p>
+<pre><code class="language-bash">ros2 launch mtrackercar calibration.launch.py \
+  pose_topic:=/measured_odom driver_odometry_topic:=/firmware_odom \
+  enable_motion:=true
+</code></pre>
+<p>Dla istniejącego strumienia <code>geometry_msgs/Pose2D</code> z polami <code>x, y, theta</code>:</p>
+<pre><code class="language-bash">ros2 launch mtrackercar calibration.launch.py \
+  pose_type:=pose2d pose_topic:=/measured_pose \
+  driver_odometry_topic:=/firmware_odom enable_motion:=true
+</code></pre>
+<p><code>Pose2D</code> nie zawiera znacznika czasu. W tym trybie świeżość oceniana jest na podstawie chwili odebrania wiadomości; opóźnionego pomiaru źródłowego nie da się rozpoznać tak jak w <code>Odometry</code>.</p>
+<p>Parametry launch <code>pose_topic</code>, <code>pose_type</code>, <code>output_dir</code> i <code>enable_motion</code> nadpisują odpowiadające im wartości w pliku <code>calibration.yaml</code>. Ustawiaj je przez argumenty launch. Pozostałe parametry, np. <code>speed</code> i <code>repeats</code>, zmieniaj w pliku przed uruchomieniem. Parametry przebiegu są odczytywane przy tworzeniu modułu.</p>
+<p>Aby korzystać z już uruchomionego sterownika, dodaj <code>start_driver:=false</code>. Istniejący sterownik musi być uruchomiony z <code>command_source=calibration_raw</code>; ten parametr wybiera się przy jego starcie. Samo <code>steering_mode=raw</code> nie zastępuje wyboru źródła komend. Dopasuj również promień koła, temat odometrii i diagnostykę.</p>
+<h3>Położenie punktu pomiarowego</h3>
+<p>Pozycja powinna dotyczyć środka tylnej osi, a theta — kierunku przodu pojazdu. Jeśli źródło opisuje inny punkt, ustaw:</p>
+<ul>
+<li><code>pose_offset_x</code>, <code>pose_offset_y</code>: położenie mierzonego punktu względem środka tylnej osi, w osiach pojazdu, w metrach;</li>
+<li><code>pose_yaw_offset</code>: orientacja raportowana przez źródło minus orientacja pojazdu, w radianach.</li>
+</ul>
+<p>Przykład: punkt pomiarowy leży <code>0.10 m</code> przed środkiem tylnej osi i jest zgodnie zorientowany. Ustaw <code>pose_offset_x: 0.10</code>, <code>pose_offset_y: 0.0</code>, <code>pose_yaw_offset: 0.0</code>. Program przeliczy pomiary na środek tylnej osi przed identyfikacją i zapisem CSV.</p>
+<h2>6. Pliki wynikowe</h2>
+<p>Każdy przebieg tworzy nowy katalog pod <code>calibration_results</code>, domyślnie względem katalogu, z którego uruchomiono program. Jego ścieżka pojawia się w komunikatach modułu.</p>
+<table>
+<thead>
+<tr>
+<th>Plik</th>
+<th>Zawartość</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>report.html</code></td>
+<td>Samodzielny raport z osadzonym wykresem; można otworzyć w przeglądarce bez serwera.</td>
+</tr>
+<tr>
+<td><code>calibration.png</code></td>
+<td>Wykres zbiorczy do podglądu i udostępniania.</td>
+</tr>
+<tr>
+<td><code>calibration.pdf</code></td>
+<td>Ten sam wykres w PDF.</td>
+</tr>
+<tr>
+<td><code>poses.csv</code></td>
+<td>Pomiary z faz <code>measure</code>: numer odcinka, powtórzenie, nastawa, kierunek, czas, x, y, theta.</td>
+</tr>
+<tr>
+<td><code>schedule.yaml</code></td>
+<td>Zaplanowana sekwencja ruchów.</td>
+</tr>
+<tr>
+<td><code>segments.csv</code></td>
+<td>Wyniki zaakceptowanych odcinków: kąt, krzywizna, droga, błąd orientacji i liczba próbek.</td>
+</tr>
+<tr>
+<td><code>identification.yaml</code></td>
+<td>Zaakceptowane współczynniki, zakresy pomiarowe, miary jakości i konfiguracja.</td>
+</tr>
+<tr>
+<td><code>steering_calibration.yaml</code></td>
+<td>Cztery współczynniki w formacie parametrów ROS 2.</td>
+</tr>
+<tr>
+<td><code>report.yaml</code></td>
+<td>Podsumowanie przebiegu i ewentualny powód błędu.</td>
+</tr>
+</tbody>
+</table>
+<p>Po anulowaniu lub odrzuceniu identyfikacji pozostają dane i raport częściowy. Pliki zaakceptowanej identyfikacji nie są wtedy eksportowane; <code>segments.csv</code> powstaje, jeśli zaakceptowano przynajmniej jeden odcinek.</p>
+<p>Katalogi nazwane <code>synthetic_example_…</code> w tym workspace zawierają <strong>przykład z danych syntetycznych</strong>. Nie są wynikiem pomiarów Twojego robota i ich współczynników nie należy traktować jako jego kalibracji.</p>
+<h2>7. Jak czytać raport</h2>
+<h3>Trajektorie XY</h3>
+<p>Pokazują zarejestrowane odcinki pomiarowe; kolor odpowiada nastawie serwa. Sprawdź płynność łuków, brak skoków i rozsądną zgodność przejazdów. Wykres obejmuje fazy pomiarowe, a nie pełny zapis postojów i ustalania skrętu.</p>
+<h3>Punkty kalibracji i wielomian</h3>
+<p>Oś pozioma przedstawia kąt wyznaczony z ruchu robota, a pionowa — zadaną surową nastawę serwa. Linia pokazuje dopasowany wielomian. Kąty na wykresie są w stopniach dla czytelności, ale współczynniki odnoszą się <strong>do radianów</strong>.</p>
+<h3>Błędy dopasowania</h3>
+<p>Wykres pokazuje <code>przewidziane rawServo − zadane rawServo</code>. Wyniki powinny skupiać się wokół zera. Systematyczny kształt lub duży rozrzut może wskazywać na niedopasowany model, luzy, poślizg albo niestabilne warunki pomiaru.</p>
+<h3>Zgodność przód–tył i powtarzalność</h3>
+<p>Dla każdej nastawy pokazane są średnie kąty i odchylenia standardowe między powtórzeniami, osobno dla obu kierunków. Duże różnice między kierunkami oznaczają, że jeden wielomian może nie opisywać wystarczająco dobrze całej charakterystyki.</p>
+<h3>Miary jakości</h3>
+<table>
+<thead>
+<tr>
+<th>Pole</th>
+<th>Interpretacja</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rmse_raw</code></td>
+<td>Błąd dopasowania wszystkich zaakceptowanych odcinków.</td>
+</tr>
+<tr>
+<td><code>cross_validation_rmse_raw</code></td>
+<td>Błąd predykcji po kolejnym pomijaniu całej nastawy serwa; sprawdza zachowanie poza punktami użytymi do dopasowania. Limit to dwukrotność <code>max_fit_rmse</code>.</td>
+</tr>
+<tr>
+<td><code>forward_reverse_difference_rad</code></td>
+<td>Największa różnica średnich kątów przód–tył dla tej samej nastawy.</td>
+</tr>
+<tr>
+<td><code>angle_range_rad</code></td>
+<td>Zakres kątów rzeczywiście objętych pomiarami.</td>
+</tr>
+<tr>
+<td><code>raw_range</code></td>
+<td>Zakres zbadanych nastaw serwa.</td>
+</tr>
+<tr>
+<td><code>condition_number</code></td>
+<td>Wskaźnik stabilności numerycznej dopasowania; program odrzuca wartość powyżej <code>1000</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Program wymaga co najmniej <code>0.20 rad</code> rozpiętości zidentyfikowanych kątów, pomiarów po obu stronach jazdy na wprost i monotonicznego wielomianu w zmierzonym zakresie. Nie ocenia poprawności modelu poza tym zakresem.</p>
+<h2>8. Zastosowanie i zapis kalibracji</h2>
+<p>Po zakończeniu pomiarów robot powinien stać, a moduł nie powinien prowadzić aktywnego przebiegu. Sprawdź, czy raport oznacza zakończenie identyfikacji bez błędu.</p>
+<p>W terminalu ustaw zmienną na <strong>rzeczywisty, zaakceptowany katalog pomiarowy</strong>, np. zastąp poniższą ścieżkę właściwą nazwą przebiegu:</p>
+<pre><code class="language-bash">RUN_DIR=/home/student/ros2_workspace/calibration_results/NAZWA_PRZEBIEGU
+ros2 param load /mtrackercar &quot;$RUN_DIR/steering_calibration.yaml&quot;
+ros2 param get /mtrackercar steering_calibration
+</code></pre>
+<p>Samo załadowanie parametrów nie zmienia kalibracji firmware. Wyślij wszystkie współczynniki jedną transakcją:</p>
+<pre><code class="language-bash">ros2 service call /set_steering_calibration std_srvs/srv/Trigger '{}'
+</code></pre>
+<p>Wymagane jest <code>success: true</code>. Kalibracja działa teraz w RAM firmware. Aby zapisać ją na stałe:</p>
+<pre><code class="language-bash">ros2 service call /save_configuration std_srvs/srv/Trigger '{}'
+</code></pre>
+<p>Usługa zatrzymuje napęd, wykonuje dwa kolejne żądania <code>CMD=8</code>, a następnie odpytuje o zakończenie zapisu. <code>success: true</code> oznacza potwierdzony status zakończenia. Zapis obejmuje całą konfigurację firmware przechowywaną w EEPROM, także inne parametry znajdujące się w tym rekordzie.</p>
+<p>Przy błędzie lub timeout sprawdź komunikat odpowiedzi; timeout może oznaczać nieznany wynik operacji. Nie zakładaj wtedy, że zapis na pewno się udał albo na pewno nie nastąpił.</p>
+<h3>Powrót do normalnej jazdy</h3>
+<p>Zakończ launch kalibracji. W głównym <code>config/mtrackercar.yaml</code> ustaw:</p>
+<ul>
+<li><code>steering_mode: angle</code>;</li>
+<li><code>max_steering_angle</code> mieszczący się w zmierzonym zakresie po obu stronach zera oraz w ograniczeniach mechanicznych;</li>
+<li>opcjonalnie zapisz zaakceptowane <code>steering_calibration</code> w konfiguracji projektu, żeby zachować spójny zapis parametrów po stronie ROS.</li>
+</ul>
+<p>Przykład: dla zakresu <code>[-0.50, +0.45] rad</code> symetryczny limit nie powinien przekraczać <code>0.45 rad</code>. Zmiana parametrów geometrii i trybu skrętu wymaga ponownego uruchomienia sterownika.</p>
+<pre><code class="language-bash">ros2 launch mtrackercar mtrackercar_master.launch.py
+</code></pre>
+<p>Normalny sterownik domyślnie korzysta z <code>drive_command</code>
+(<code>ackermann_msgs/msg/AckermannDriveStamped</code>): <code>drive.speed</code> w m/s oraz
+<code>drive.steering_angle</code> jako fizyczny kąt zastępczego koła przedniej osi w radianach.
+Wymagany jest bieżący, niezerowy <code>header.stamp</code>; <code>frame_id</code> może być pusty
+lub równy nazwie układu robota. Firmware stosuje swoją
+zapisaną kalibrację. Surowe sterowanie jest dostępne wyłącznie przez
+<code>command_source=calibration_raw</code> i <code>calibration/raw_command</code>.</p>
+<p>Przykład publikacji komendy fizycznej (uruchamia napęd):</p>
+<pre><code class="language-bash">ros2 topic pub --rate 20 /drive_command ackermann_msgs/msg/AckermannDriveStamped \
+  '{header: auto, drive: {speed: 0.05, steering_angle: 0.20}}'
+</code></pre>
+<p>Po zakończeniu publikacji sterownik zatrzymuje napęd przez timeout komend.
+<code>header: auto</code> aktualizuje czas przy każdej publikacji w ROS 2 Jazzy.
+Sterownik wykorzystuje tylko prędkość i kąt; pola przyspieszenia, jerk
+i prędkości skrętu pozostaw zerowe — ich ograniczenia nie są realizowane.
+Przyjęta kalibracja z 2026-10-31 objęła zakres <code>[-0.2630, +0.3289] rad</code>,
+czyli około <code>[-15.1°, +18.8°]</code>. Domyślny limit jazdy wynosi symetrycznie
+<code>±0.26 rad</code> (<code>±14.9°</code>). To zakres użytkowy mieszczący się w pomiarach,
+a nie wyznaczenie mechanicznych ograniczników. Po zmianie konfiguracji
+robota kalibrację i ten limit trzeba sprawdzić ponownie.
+Dla istniejących kontrolerów publikujących <code>cmd_vel</code> wybierz jawnie tryb zgodności:</p>
+<pre><code class="language-bash">ros2 launch mtrackercar mtrackercar_master.launch.py command_source:=cmd_vel
+</code></pre>
+<p>W tym trybie <code>angular.z</code> nadal oznacza prędkość obrotu pojazdu w rad/s;
+sterownik przelicza ją na fizyczny kąt. Zwykła jazda zawsze używa trybu
+skalibrowanego kąta w firmware. Samo uruchomienie sterownika ani wpisanie
+współczynników do YAML nie wysyła <code>CMD=13</code> i nie zapisuje EEPROM.</p>
+<p>Trwałość kalibracji po wyłączeniu zasilania wymaga sprawdzenia na rzeczywistym robocie. Wykonane testy programowe nie zastępują tej próby.</p>
+<h2>9. Ponowna identyfikacja offline</h2>
+<p>Zapisane dane można przeliczyć ponownie bez jazdy i bez połączenia z robotem:</p>
+<pre><code class="language-bash">ros2 run mtrackercar steering_calibration \
+  --offline &quot;$RUN_DIR/poses.csv&quot; \
+  --wheel-base 0.190 \
+  --output-dir /home/student/ros2_workspace/calibration_results/reanalysis
+</code></pre>
+<p>Użyj faktycznego <code>wheel_base</code> badanego robota. Powstanie nowy katalog wyników. Plik CSV zawiera już pozycję skorygowaną o offset punktu pomiarowego, dlatego nie należy przeliczać offsetu drugi raz.</p>
+<p>Tryb CLI offline używa domyślnych progów jakości. Przy przeliczaniu danych zebranych z innymi progami należy dopasować argumenty funkcji w module <code>calibration_identification.py</code>. Niepełny przebieg może nie spełniać warunków identyfikacji.</p>
+<h2>10. Najczęstsze komunikaty</h2>
+<table>
+<thead>
+<tr>
+<th>Komunikat / objaw</th>
+<th>Co sprawdzić</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Set enable_motion=true…</code></td>
+<td>Uruchom launch z <code>enable_motion:=true</code>; potem wywołaj usługę <code>start</code>.</td>
+</tr>
+<tr>
+<td><code>Fresh odom pose is required</code></td>
+<td>Temat, typ wiadomości, aktualność znaczników czasu, nazwy układów i quaternion.</td>
+</tr>
+<tr>
+<td><code>Confirmed driver serial communication is required</code></td>
+<td>Port szeregowy, numer robota, firmware i <code>/diagnostics</code>.</td>
+</tr>
+<tr>
+<td><code>Start driver with command_source=calibration_raw</code></td>
+<td>Czy sterownik jest uruchomiony w trybie dedykowanego wejścia surowego.</td>
+</tr>
+<tr>
+<td><code>Pose feedback lost</code></td>
+<td>Ciągłość publikacji odom i próg <code>pose_timeout</code>.</td>
+</tr>
+<tr>
+<td><code>Driver serial feedback lost</code></td>
+<td>Błędy komunikacji i aktualność diagnostyki sterownika.</td>
+</tr>
+<tr>
+<td><code>Insufficient travel…</code></td>
+<td>Czy robot się porusza, czy odom to rejestruje i czy odcinek jest wystarczająco długi.</td>
+</tr>
+<tr>
+<td>Robot cofa tylko raz i zatrzymuje się</td>
+<td>Sprawdź końcowy błąd w terminalu launch i <code>report.yaml</code> rzeczywistego przebiegu. Jeśli komunikat zawiera <code>motion opposite to commanded direction</code>, porównaj kierunek komendy, rzeczywisty ruch i znak drogi z odom. Po aktualizacji sterownika przebuduj pakiet i uruchom launch ponownie.</td>
+</tr>
+<tr>
+<td><code>Curvature is not constant…</code></td>
+<td>Czas ustalania skrętu, luzy mechaniczne, poślizg i stabilność pomiaru.</td>
+</tr>
+<tr>
+<td><code>Forward/reverse steering disagreement…</code></td>
+<td>Rozbieżność kierunków, geometrię odometrii i powtarzalność mechaniki.</td>
+</tr>
+<tr>
+<td><code>Calibration … budget exceeded</code></td>
+<td>Zaplanowaną liczbę odcinków oraz limity czasu, drogi i promienia.</td>
+</tr>
+<tr>
+<td><code>Cubic prediction error…</code></td>
+<td>Wykres błędów, zakres próbek i zgodność modelu z pomiarem.</td>
+</tr>
+</tbody>
+</table>
+<p>Nie zwiększaj progów jakości wyłącznie po to, aby otrzymać współczynniki. Najpierw ustal przyczynę odrzucenia i sprawdź raport częściowy.</p>
+<p>Katalog wyników jest domyślnie względny wobec katalogu uruchomienia launch.
+Jeśli launch uruchomiono z <code>/home/student</code>, dane znajdziesz w
+<code>/home/student/calibration_results</code>, a nie w workspace. Pełna ścieżka może być
+ustawiona argumentem <code>output_dir</code>. Raport <code>synthetic_example_…/report.html</code>
+nie pokazuje ostatniego przejazdu robota.</p>
+</body></html>

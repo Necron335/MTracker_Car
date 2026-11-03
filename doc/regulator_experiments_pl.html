@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rejestracja i automatyczne strojenie lewego regulatora CAR</title>
+<style>
+body{font:16px/1.65 system-ui,sans-serif;max-width:1050px;margin:40px auto;padding:0 24px;color:#172130;background:#fff}
+h1,h2,h3{line-height:1.25}h1{font-size:2.2rem}h2{margin-top:2.5rem;border-bottom:1px solid #d7dfe8;padding-bottom:.5rem}h3{margin-top:1.7rem}
+a{color:#1559a2}pre{background:#f2f5f8;border:1px solid #d7dfe8;border-radius:6px;padding:16px;overflow:auto;line-height:1.5}
+code{font-family:ui-monospace,monospace;font-size:.9em}p code,li code,td code{background:#f2f5f8;padding:.1em .25em;border-radius:3px}
+table{border-collapse:collapse;width:100%;font-size:.92em;margin:1rem 0}th,td{border:1px solid #d7dfe8;padding:10px;text-align:left;vertical-align:top}th{background:#edf2f7}tr:nth-child(even){background:#fafbfd}
+@media print{body{max-width:none;margin:0;font-size:10pt;padding:0}pre{white-space:pre-wrap}h2,h3{break-after:avoid}tr,pre{break-inside:avoid}a{color:inherit;text-decoration:none}}
+</style></head><body>
+<h1>Rejestracja i automatyczne strojenie lewego regulatora CAR</h1>
+<h2>Dane pomiarowe</h2>
+<p>Domyślnie <code>acquisition: cmd5_telemetry</code> korzysta z dostępnych odpowiedzi
+sterownika, bez dodatkowego adaptera firmware. Temat <code>/regulator/drive_sample</code>
+(<code>mtrackercar/msg/DriveSample</code>) zawiera prędkość zmierzoną i wyjście silnika
+z odpowiedzi CMD=5 oraz prędkość z żądania dopasowanego po numerze sekwencji.
+Czas oznacza odebranie odpowiedzi przez sterownik, a nie chwilę pomiaru MCU.
+Komenda w tym temacie nie jest odczytem wewnętrznej referencji regulatora.</p>
+<p>Ten tryb ocenia śledzenie prędkości i aktywność wyjścia. Nie odtwarza błędu
+pozycji ani bufora RAM. Wymaga co najmniej 20 Hz, przerw poniżej 0.15 s
+i pełnego zapisu przebiegu; opóźnienia PC ograniczają ocenę szybkiej dynamiki.
+Nie służy do identyfikacji przebiegów z rozdzielczością 1 ms.</p>
+<p>Opcjonalny <code>acquisition: firmware_buffer</code> używa próbek z RAM MTrackera.
+Zgodnie z <code>trace_signal_map.md</code> wybierane
+kanały CAR to <code>[1, 5, 13, 15]</code>:</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Pole firmware</th>
+<th>Zapis w module</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>drive.wRear</code></td>
+<td>prędkość robota <code>velocity_m_s = wRear * wheel_radius</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>regL.u</code></td>
+<td>wyjście lewego regulatora <code>left_output</code>, <code>[-1,1]</code></td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>regL.e_phi</code></td>
+<td><strong>błąd pozycji</strong> lewego regulatora <code>left_position_error_rad</code></td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>RearWheelReference()</code></td>
+<td>rzeczywiste zadanie <code>reference_velocity_m_s = reference * wheel_radius</code></td>
+</tr>
+</tbody>
+</table>
+<p>Kanały prawego regulatora nie są wykorzystywane. Błąd śledzenia prędkości
+<code>reference_velocity_m_s - velocity_m_s</code> obliczany jest dodatkowo do oceny
+jakości; nie jest zamiennikiem błędu pozycji z kanału 13.</p>
+<p>Każdy sygnał zajmuje dwa słowa 16-bit, młodsze pierwsze. Kolejność kanałów
+odpowiada żądaniu START. Czas próbki jest odtwarzany jako
+<code>index * period_ms / 1000</code>. Dla 4 kanałów bufor 512 KiB mieści 32768 próbek,
+czyli około 32.768 s przy okresie 1 ms. Moduł <code>trace_data.py</code> dekoduje ten
+format, sprawdza pełne rekordy i konwertuje kanały CAR do jednostek CSV.</p>
+<h2>Przebiegi zadane</h2>
+<p><code>config/regulator_experiment.yaml</code> definiuje sygnały <code>training</code> i <code>validation</code>.
+Dostępne rodzaje <code>kind</code>:</p>
+<ul>
+<li><code>steps</code>: dodatnie skoki, zatrzymanie, ujemne skoki i zatrzymanie;</li>
+<li><code>ramp</code>: narastanie i opadanie prędkości w obu kierunkach;</li>
+<li><code>sine</code>: sinus o zadanej częstotliwości;</li>
+<li><code>chirp</code>: sinus o liniowo zmienianej częstotliwości;</li>
+<li><code>prbs</code>: powtarzalny pseudolosowy przebieg dwupoziomowy.</li>
+</ul>
+<p><code>amplitude</code> jest w m/s, <code>duration</code> i <code>quiet</code> w sekundach, częstotliwości w Hz.
+Na początku i końcu każdego przebiegu występuje odcinek zerowej prędkości.
+Sterowanie prędkością z PC nie ma gwarancji czasu rzeczywistego. Do oceny
+używana jest referencja z żądania CMD=5 albo <strong>rzeczywista referencja z bufora</strong>,
+zależnie od trybu, a nie wyłącznie teoretyczny przebieg zadany.
+Zerwane indeksy, nieciągły czas, przepełnienie i brak końca
+rejestracji dyskwalifikują próbę.</p>
+<h2>Metoda automatyczna</h2>
+<p>Przeszukiwane są cztery parametry <code>CMD=4</code>:</p>
+<ol>
+<li><code>feedback_bandwidth</code> — pasmo sprzężenia, <code>1..200 rad/s</code>;</li>
+<li><code>observer_bandwidth</code> — pasmo ESO silnika, od pasma sprzężenia do <code>1000 rad/s</code>;</li>
+<li><code>damping</code> — <code>0.1..5</code>;</li>
+<li><code>inertia</code> — <code>0.00001..1</code>.</li>
+</ol>
+<p>Punktem początkowym są znane, działające nastawy operatora. W pliku domyślnym
+wpisano wartości CAR z dokumentacji: <code>[15.0, 80.0, 1.0, 0.0025]</code>. Nie oznacza
+to odczytu nastaw z Twojego robota. Przed uruchomieniem strojenia potwierdź
+<code>baseline_confirmed: true</code> i dopasuj <code>baseline</code> do sprawdzonej konfiguracji.</p>
+<p>Zastosowano ograniczone przeszukiwanie współrzędnych w logarytmach parametrów.
+Ta metoda nie wymaga różniczkowania zaszumionych danych. Każda próba zmienia
+jedną współrzędną, pozostaje w zadanym przedziale i odtwarza ten sam sygnał
+treningowy. Przy braku poprawy krok jest zmniejszany.</p>
+<p>Przykładowe wąskie przedziały w pliku konfiguracyjnym są propozycją początkową,
+a nie potwierdzonym obszarem stabilności robota. Cały zakres ESO musi pozostawać
+powyżej całego zakresu pasma sprzężenia w tej implementacji.</p>
+<p>Minimalizowana funkcja łączy:</p>
+<ul>
+<li>RMSE śledzenia prędkości, odniesione do amplitudy;</li>
+<li>tylko w trybie RAM: RMS błędu pozycji <code>regL.e_phi</code>, znormalizowany przez drogę przy amplitudzie
+prędkości przez 1 sekundę;</li>
+<li>aktywność sygnału sterującego;</li>
+<li>udział próbek z nasyconym wyjściem.</li>
+</ul>
+<p>Jeśli zapisany przebieg nie spełni warunku ustalenia prędkości po końcowym
+zatrzymaniu (<code>Robot did not settle after the final stop</code>), próba otrzymuje
+status <code>quality_rejected</code>, a jej CSV pozostaje w wynikach. Program zadaje zero
+i czeka do 5 s na prędkość nieprzekraczającą 0.015 m/s przez co najmniej 0.4 s.
+Po potwierdzeniu zatrzymania idzie dalej: pomija taki punkt treningowy,
+a pomiar walidacyjny powtarza jeden raz. Powtórka ma własny numer próby i CSV.
+Jeżeli również ona zostanie odrzucona, wykonywane są pozostałe pomiary,
+ale niepełna walidacja nie pozwala zastosować ani zapisać nowych nastaw.
+<code>relative_improvement</code> ma wtedy wartość <code>null</code>, a wynik wraca do bazy.</p>
+<p>Dalszy ruch po 5 s zatrzymywania, utrata komunikacji, przekroczenie limitów,
+nadmierne nasycenie lub uszkodzone dane nadal przerywają przebieg z próbą
+przywrócenia bazy. Odrzucony pomiar nie jest traktowany jako poprawny wynik.</p>
+<p>Najlepszy kandydat jest następnie porównywany z bazą na osobnym sygnale
+walidacyjnym. Domyślnie wykonuje się po 2 próby dla bazy i kandydata, ze
+zmienianą kolejnością. Wymagana jest poprawa średniej oceny o co najmniej 3%
+i brak pogorszenia w parach prób. Raport pokazuje <strong>najlepszy znaleziony
+zestaw w badanym zakresie</strong>, nie dowód globalnego optimum.</p>
+<h2>Zastosowanie i zapis</h2>
+<p>Domyślnie <code>apply_best: false</code> i <code>persist_best: false</code>: po próbach wraca baza,
+a wynik jest propozycją w raporcie. Każda próba strojenia tymczasowo zmienia
+nastawy w RAM, nawet gdy zastosowanie wyniku końcowego jest wyłączone.</p>
+<p>Po udanej walidacji <code>apply_best: true</code> wysyła wszystkie cztery parametry przez
+istniejącą usługę <code>/set_regulator</code>. <code>persist_best: true</code> następnie korzysta z
+<code>/save_configuration</code>, która sprawdza dwustopniowy zapis EEPROM i jego
+zakończenie. Zapis dotyczy całego rekordu konfiguracji, także kalibracji skrętu.</p>
+<p>Jeżeli wynik nie przejdzie walidacji, program przywraca bazę bez zapisu EEPROM.
+Przy przerwanym połączeniu przywrócenie może się nie udać; stan jest zapisany
+w raporcie. Timeout zapisu EEPROM oznacza <strong>nieznany wynik zapisu</strong>, nawet gdy
+później uda się przywrócić bazę w RAM. Nie jest to potwierdzenie przywrócenia
+poprzedniej zawartości EEPROM.</p>
+<h2>Uruchomienie</h2>
+<p>Tryb telemetrii działa przez istniejący protokół CMD=4 i CMD=5.
+Nie wymaga analizy ani zmiany firmware. Opcjonalne pełne podłączenie usługi
+<code>/controller_capture</code> do portu szeregowego wymaga stałych TRACE oraz semantyki
+odpowiedzi z <code>MTrackerProtocol.h</code> / <code>MTrackerTrace.m</code>. Bez dostępnego dostawcy
+tej usługi preflight trybu <code>firmware_buffer</code> kończy się błędem przed próbą ruchu
+lub zmianą regulatora. Wybór telemetrii jest jawnym osobnym trybem, z innym CSV
+i funkcją oceny; próbki RAM nie są zastępowane danymi CMD=5.</p>
+<p>Przebuduj pakiet i zakończ wcześniej uruchomiony sterownik:</p>
+<pre><code class="language-bash">cd /home/student/ros2_workspace
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-up-to mtrackercar --symlink-install
+source /home/student/ros2_workspace/install/setup.bash
+ros2 launch mtrackercar regulator_tuning.launch.py mode:=record
+</code></pre>
+<p>W konfiguracji eksperymentu ustaw jawnie <code>enable_motion: true</code>. Zapis danych
+bez zmiany regulatora to <code>mode:=record</code>; pełne strojenie to <code>mode:=tune</code>.
+Przed pełnym strojeniem ustaw sprawdzone <code>baseline</code>, granice <code>bounds</code>
+i <code>baseline_confirmed: true</code>, a następnie uruchom launch z <code>mode:=tune</code>.
+Konfiguracja jest odczytywana przy starcie procesu. Launch i usługa startowa
+nie są potwierdzeniem zakończenia strojenia; wynik znajdziesz na temacie statusu
+i w raporcie. Przed użyciem sprawdź zgodność kierunku ruchu z komendą i odom.</p>
+<pre><code class="language-bash">ros2 service call /regulator_tuning/start std_srvs/srv/Trigger '{}'
+ros2 topic echo /regulator/status
+# Przerwanie:
+ros2 service call /regulator_tuning/cancel std_srvs/srv/Trigger '{}'
+</code></pre>
+<p>Launch wybiera w sterowniku <code>command_source=regulator_tuning</code>, dedykowane
+wejście prędkości w m/s i zerowy kąt skrętu. Ignoruje <code>cmd_vel</code>. Sterownik
+ogranicza zadanie do 0.10 m/s i zachowuje watchdog komend. Moduł dodatkowo
+monitoruje świeżość odom, diagnostykę, prędkość i promień obszaru eksperymentu.
+Limity <code>max_duration_s</code> i <code>max_total_distance_m</code> obejmują cały przebieg.
+<code>max_trials</code> dotyczy treningu; dochodzi <code>2 × validation_repeats</code> prób walidacji.
+Nie uruchamiaj równocześnie innego modułu strojenia ani usług zmieniających
+nastawy. Anulowanie zatrzymuje ruch i podejmuje przywrócenie bazy; poczekaj
+na końcowy status. <code>Ctrl+C</code> utrzymuje obsługę odpowiedzi na czas zakończenia
+pracy i przywracania nastaw (do 20 s). Utrata połączenia może uniemożliwić rollback.</p>
+<h2>Odpowiedzi konfiguracji i timeout</h2>
+<p>W transporcie USB/SCI <code>CMD=4</code> zwraca bezpośrednio <code>LEN=22</code>: status i cztery
+aktywne wartości. Nie wymaga osobnego odczytu ani pakietu POLL (POLL dotyczy
+transportu radiowego nRF24). Dokumentacja nie gwarantuje czasu odpowiedzi.</p>
+<p>Sterownik kończy oczekującą transakcję ruchu, wysyła zatrzymanie i czeka na
+jego odpowiedź, a dopiero potem wysyła konfigurację. <code>response_timeout_ms</code>
+(domyślnie 50 ms) dotyczy cyklicznego ruchu, a <code>configuration_timeout_ms</code>
+(domyślnie 500 ms, zakres 1..2000 ms) oczekiwania w transakcjach konfiguracji.
+Po konfiguracji moduł czeka na powrót świeżej telemetrii przed następną próbą.</p>
+<p>Timeout wskazuje oczekiwane <code>CMD</code>, <code>SEQ</code>, liczbę odebranych bajtów i liczbę
+ramek niedopasowanych do żądania. <code>CMD=5</code> wskazuje etap ruchu/zatrzymania,
+<code>CMD=4</code> — ustawianie regulatora. Brak odpowiedzi nie dowodzi, że firmware
+nie zastosowało ustawień. Program przerywa strojenie, czeka do 5 s na powrót
+potwierdzonej komunikacji i podejmuje jedną próbę przywrócenia bazy.
+Sprawdź <code>baseline_restored</code> w <code>tuning.yaml</code>; samo <code>Connected to …</code>
+potwierdza otwarcie portu, a nie przywrócenie nastaw. Moduł nie ponawia
+automatycznie niepotwierdzonej próby strojenia ani zapisu EEPROM.</p>
+<p>Po potwierdzonym uzbrojeniu zapisu sterownik wysyła drugie żądanie tylko raz.
+Jeśli jego potwierdzenie zaginie, przechodzi do odczytu statusu. Timeout
+pojedynczego odczytu statusu nie kończy operacji: zapytania tylko do odczytu
+są ponawiane w ramach 5-sekundowego limitu oczekiwania na zakończenie.
+Nie są ponawiane żądania inicjujące zapis. Brak potwierdzenia pierwszego
+uzbrojenia nadal kończy operację jako niepotwierdzoną.</p>
+<p>Błąd EEPROM nie usuwa ukończonego strojenia: sprawdź <code>validated</code>,
+<code>selected_parameters</code> i <code>relative_improvement</code> w <code>tuning.yaml</code> oraz plik
+<code>regulator_parameters.yaml</code>. Przywrócenie bazy w RAM po błędzie nie cofa
+ewentualnego zapisu EEPROM. Aby ponownie zastosować wybrane nastawy,
+wyślij wartości z tego pliku przez <code>/set_regulator</code>; nie trzeba powtarzać
+wszystkich przejazdów. Zapis trwały to osobna operacja <code>/save_configuration</code>.</p>
+<h2>Wyniki i wykresy</h2>
+<p>Wyniki powstają w <code>output_dir/&lt;data_czas&gt;/</code>, domyślnie <code>regulator_results</code>
+względem katalogu uruchomienia. Każda próba trafia do <code>trial_NNN.csv</code>.
+Tryb CMD=5 zapisuje:</p>
+<pre><code class="language-text">index,time_s,requested_velocity_m_s,velocity_m_s,motor_output
+</code></pre>
+<p>Tryb RAM zapisuje:</p>
+<pre><code class="language-text">index,time_s,reference_velocity_m_s,velocity_m_s,left_position_error_rad,left_output
+</code></pre>
+<p><code>tuning.yaml</code> zawiera parametry każdej próby, miary jakości, błędy i końcowy
+status walidacji, zastosowania i zapisu. Po zaakceptowanej walidacji powstaje
+<code>regulator_parameters.yaml</code> z wybranymi czterema nastawami.</p>
+<p><code>report.html</code> jest samodzielnym raportem z osadzonym wykresem. Dostępne są
+również <code>regulator.png</code> i <code>regulator.pdf</code>. Wykres pokazuje prędkość zadaną
+i zmierzoną, błąd śledzenia prędkości (CMD=5) albo błąd pozycji (RAM),
+wyjście silnika oraz oceny prób. Pole <code>acquisition</code> wskazuje źródło danych.
+Ranking parametrów treningowych jest oddzielony od wyników walidacji.</p>
+<p>Przykład bez robota:</p>
+<pre><code class="language-bash">ros2 run mtrackercar regulator_tuning \
+  --config /home/student/ros2_workspace/src/MTrackerCar-ROS/config/regulator_experiment.yaml \
+  --mode tune --demo
+</code></pre>
+<p>Tryb <code>--demo</code> używa syntetycznego obiektu testowego, <strong>nie modelu ADRC MTrackera</strong>.
+Nie łączy się z robotem i nie zapisuje EEPROM. Raport jest oznaczony jako
+syntetyczny; znalezione w nim nastawy nie są wynikiem strojenia Twojego robota.</p>
+<h2>Kontrakt adaptera bufora</h2>
+<p><code>mtrackercar/srv/ControllerCapture</code> udostępnia operacje START/STOP/READ.
+START identyfikuje sesję, okres próbkowania, pojemność i wiek uruchomienia
+rejestracji. STOP jest idempotentny i potwierdza liczbę próbek, kompletność
+oraz brak przepełnienia. READ zwraca strony jednego niezmiennego przebiegu
+z ciągłymi indeksami. Wartości <code>ControllerBufferSample</code> muszą pochodzić z
+kanałów RAM, a nie z interpolacji telemetrii PC. Wiek rejestracji umożliwia
+zgranie generatora zadania z początkiem czasu próbek.</p>
+<p>Zobacz także <a href="trace_signal_map.md">mapę sygnałów</a>,
+<a href="communication_protocol.md">pełny protokół</a> i
+<a href="regulator_manual_pl.html">ustawianie regulatora</a>.</p>
+</body></html>

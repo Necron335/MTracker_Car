@@ -1,0 +1,13 @@
+# User unit: ~/.config/systemd/user/pc-power-monitor.service
+[Unit]
+Description=MTracker supply monitor for NUC
+
+[Service]
+Type=simple
+WorkingDirectory=/home/student/ros2_workspace
+ExecStart=/bin/bash -c 'source /opt/ros/jazzy/setup.bash && source /home/student/ros2_workspace/install/setup.bash && exec ros2 run mtrackercar pc_power_monitor --ros-args --params-file /home/student/ros2_workspace/src/MTrackerCar-ROS/config/pc_power_monitor.yaml'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

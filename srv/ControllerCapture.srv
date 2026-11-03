@@ -1,0 +1,20 @@
+# Adapter interface: firmware command numbers/layout require the buffer specification.
+uint8 START=0
+uint8 STOP=1
+uint8 READ=2
+uint8 action
+string capture_id
+float64 duration_s
+uint32 offset
+uint32 max_samples
+---
+bool success
+string message
+string capture_id
+float64 sample_period_s
+float64 capture_age_s
+uint32 capacity
+uint32 total_samples
+bool complete
+bool overflow
+ControllerBufferSample[] samples

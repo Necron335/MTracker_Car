@@ -1,0 +1,34 @@
+# CMD=5 telemetry is available directly from the driver (>=20 Hz required).
+# Optional acquisition: firmware_buffer requires a verified /controller_capture provider.
+acquisition: cmd5_telemetry
+# CAR RAM channels: [1, 5, 13, 15]; period 1 ms. Error ID 13 is position in rad.
+enable_motion: true
+baseline_confirmed: true  # Set true only after confirming known-working baseline.
+baseline: [18.6, 60.0, 1.0, 0.0068]
+# Proposed initial search limits, not firmware-certified stability limits.
+bounds: [[10.0, 30.0], [30.0, 300.0], [0.8, 1.2], [0.001, 0.01]]
+max_trials: 50
+validation_repeats: 2
+min_improvement: 0.03
+apply_best: true  # Restore baseline after the experiment unless explicitly enabled.
+persist_best: true  # EEPROM is a separate opt-in after validation.
+wheel_radius: 0.033
+command_rate_hz: 50.0
+max_speed_m_s: 0.15
+feedback_timeout_s: 0.3
+max_radius_m: 2.0
+max_total_distance_m: 100.0
+max_duration_s: 6000.0
+output_dir: regulator_results
+training:
+  kind: steps
+  amplitude: 0.05
+  duration: 12.0
+  quiet: 1.0
+validation:
+  kind: prbs
+  amplitude: 0.04
+  duration: 14.0
+  quiet: 1.0
+  frequency_end: 1.5
+  seed: 19

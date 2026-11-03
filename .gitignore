@@ -1,0 +1,39 @@
+build/
+install/
+log/
+__pycache__/
+*.pyc
+calibration_results/
+regulator_results/
+
+# Test/tool caches and local recordings.
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+rosbag2_*/
+bags/
+compile_commands.json
+
+# NUC diagnostics and standalone build products if generated inside this repo.
+build-nuc-power-monitor/
+power_audit/
+nuc_ec_results/
+nuc_ec_analysis/
+# ROS 2
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

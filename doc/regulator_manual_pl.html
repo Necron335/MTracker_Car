@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ustawianie regulatora napędu</title>
+<style>
+body{font:16px/1.65 system-ui,sans-serif;max-width:1050px;margin:40px auto;padding:0 24px;color:#172130;background:#fff}
+h1,h2,h3{line-height:1.25}h1{font-size:2.2rem}h2{margin-top:2.5rem;border-bottom:1px solid #d7dfe8;padding-bottom:.5rem}h3{margin-top:1.7rem}
+a{color:#1559a2}pre{background:#f2f5f8;border:1px solid #d7dfe8;border-radius:6px;padding:16px;overflow:auto;line-height:1.5}
+code{font-family:ui-monospace,monospace;font-size:.9em}p code,li code,td code{background:#f2f5f8;padding:.1em .25em;border-radius:3px}
+table{border-collapse:collapse;width:100%;font-size:.92em;margin:1rem 0}th,td{border:1px solid #d7dfe8;padding:10px;text-align:left;vertical-align:top}th{background:#edf2f7}tr:nth-child(even){background:#fafbfd}
+@media print{body{max-width:none;margin:0;font-size:10pt;padding:0}pre{white-space:pre-wrap}h2,h3{break-after:avoid}tr,pre{break-inside:avoid}a{color:inherit;text-decoration:none}}
+</style></head><body>
+<h1>Ustawianie regulatora napędu</h1>
+<p>Usługa <code>/set_regulator</code> sterownika <code>mtrackercar_drv</code> wysyła <code>CMD=4</code>.
+Dotyczy regulatora napędu w firmware, a nie regulatora śledzenia trajektorii ROS.
+Firmware udostępnia cztery parametry, a nie klasyczne Kp, Ki, Kd:</p>
+<table>
+<thead>
+<tr>
+<th>Pole usługi</th>
+<th>Pole firmware</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>feedback_bandwidth</code></td>
+<td><code>feedbackBandwidth</code></td>
+</tr>
+<tr>
+<td><code>observer_bandwidth</code></td>
+<td><code>observerBandwidth</code></td>
+</tr>
+<tr>
+<td><code>damping</code></td>
+<td><code>damping</code></td>
+</tr>
+<tr>
+<td><code>inertia</code></td>
+<td><code>inertia</code></td>
+</tr>
+</tbody>
+</table>
+<p>Dokumentacja aktualnego firmware podaje domyślne nastawy CAR: pasmo sprzężenia
+<code>15.0 rad/s</code>, pasmo ESO <code>80.0 rad/s</code>, tłumienie <code>1.0</code>, bezwładność <code>0.0025</code>.
+Pełny protokół określa zakresy: sprzężenie <code>1..200</code>, ESO od pasma sprzężenia
+do <code>1000</code>, tłumienie <code>0.1..5</code>, bezwładność <code>0.00001..1</code>. Moduł wymaga wartości skończonych i dodatnich; firmware może je
+dodatkowo odrzucić. Nie wyznacza wzmocnień automatycznie.</p>
+<p>Do automatycznego dobierania tych czterech parametrów służy osobny moduł
+<code>regulator_tuning</code>: <a href="regulator_experiments_pl.html">instrukcja strojenia</a>
+(<a href="regulator_experiments_pl.html">HTML</a>). Domyślnie używa telemetrii CMD=5;
+nie wymaga dostawcy próbek RAM.</p>
+<h2>Uruchomienie i zmiana</h2>
+<p>Przebuduj pakiet (w tym nowy interfejs usługi):</p>
+<pre><code class="language-bash">cd /home/student/ros2_workspace
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-up-to mtrackercar --symlink-install
+source install/setup.bash
+</code></pre>
+<p>Zakończ poprzedni launch przez <code>Ctrl+C</code>. Uruchom zwykły sterownik:</p>
+<pre><code class="language-bash">ros2 launch mtrackercar mtrackercar_master.launch.py
+</code></pre>
+<p>Usługa jest również dostępna w sterowniku uruchomionym przez launch kalibracji;
+nie uruchamiaj wtedy drugiego sterownika na tym samym porcie szeregowym.</p>
+<p>W drugim terminalu załaduj środowisko i sprawdź interfejs:</p>
+<pre><code class="language-bash">source /opt/ros/jazzy/setup.bash
+source /home/student/ros2_workspace/install/setup.bash
+ros2 interface show mtrackercar/srv/SetRegulator
+</code></pre>
+<p>Zakończ aktywną kalibrację i zatrzymaj źródła komend jazdy przed zmianą.
+Usługa zatrzymuje napęd przed transakcją, ale kolejne komendy jazdy mogą go
+ponownie uruchomić.</p>
+<p>Wstaw swoje cztery wartości w poniższe pola. Symbole są miejscami do zastąpienia,
+nie proponowanymi nastawami:</p>
+<pre><code class="language-bash">ros2 service call /set_regulator mtrackercar/srv/SetRegulator \
+  '{feedback_bandwidth: TWOJE_FB, observer_bandwidth: TWOJE_OBS, damping: TWOJE_D, inertia: TWOJE_J}'
+</code></pre>
+<p><code>success: true</code> oznacza, że robot zaakceptował wszystkie cztery wartości i odesłał
+te same nastawy. <code>active_values</code> zawiera wartości zwrócone przez firmware w kolejności
+z tabeli; przy niepowodzeniu mogą być niedostępne i pozostać zerowe.
+Timeout oznacza nieznany wynik zmiany.</p>
+<p>Domyślne nastawy z dokumentacji można wysłać jawnie:</p>
+<pre><code class="language-bash">ros2 service call /set_regulator mtrackercar/srv/SetRegulator \
+  '{feedback_bandwidth: 15.0, observer_bandwidth: 80.0, damping: 1.0, inertia: 0.0025}'
+</code></pre>
+<p><code>observer_bandwidth</code> zmienia ESO regulatora silnika. Osobny obserwator prędkości
+z pozycji enkodera ma stałe pasmo <code>20 rad/s</code>, działa z częstotliwością <code>1 kHz</code>
+i nie jest konfigurowany przez <code>CMD=4</code>. Firmware nie udostępnia parametru
+kompensacji martwej strefy ani tarcia statycznego.</p>
+<p>Nie ma przycisku przywracania poprzednich wartości. Zachowaj znane, działające nastawy przed zmianą, aby móc ponownie
+wysłać je tą samą usługą. <code>active_values</code> to wynik ostatniej transakcji,
+nie niezależny odczyt ani historia ustawień.</p>
+<p>Usługa zmienia ustawienia w RAM. Nie wysyła nic przy starcie sterownika.
+Opisany protokół nie definiuje osobnego żądania odczytu regulatora, więc moduł
+nie oferuje odczytu istniejących nastaw bez ich zmiany.</p>
+<h2>Zapis trwały</h2>
+<p>Po sprawdzeniu działania zapisz konfigurację osobno:</p>
+<pre><code class="language-bash">ros2 service call /save_configuration std_srvs/srv/Trigger '{}'
+</code></pre>
+<p>Wymagane jest <code>success: true</code>. Operacja zapisuje całą konfigurację firmware,
+w tym kalibrację skrętu. Testy programowe nie potwierdzają zachowania konkretnego
+robota ani trwałości po wyłączeniu zasilania.</p>
+<h2>Diagnostyka</h2>
+<table>
+<thead>
+<tr>
+<th>Objaw lub komunikat</th>
+<th>Co zrobić</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nieznany typ <code>mtrackercar/srv/SetRegulator</code></td>
+<td>Przebuduj pakiet i wykonaj <code>source install/setup.bash</code> w terminalu klienta.</td>
+</tr>
+<tr>
+<td>Oczekiwanie na <code>/set_regulator</code></td>
+<td>Sprawdź, czy działa nowa wersja sterownika; przy namespace dostosuj nazwę usługi.</td>
+</tr>
+<tr>
+<td><code>Regulator parameters must be finite and positive</code></td>
+<td>Podaj wszystkie cztery wartości liczbowe większe od zera. Żądanie nie zostało wysłane.</td>
+</tr>
+<tr>
+<td><code>No confirmed serial connection</code></td>
+<td>Sprawdź port, adres robota i <code>/diagnostics</code>.</td>
+</tr>
+<tr>
+<td><code>Regulator rejected, status=…</code></td>
+<td>Firmware odrzuciło żądanie; sprawdź wartości i opis statusów w <code>protocol.md</code>.</td>
+</tr>
+<tr>
+<td><code>Firmware returned different active regulator parameters</code></td>
+<td>Sprawdź <code>active_values</code>; moduł nie potwierdził żądanych nastaw.</td>
+</tr>
+<tr>
+<td>Timeout lub nieprawidłowa odpowiedź</td>
+<td>Wynik może być nieznany. Nie traktuj go jako potwierdzenia ani gwarancji pozostawienia poprzednich nastaw.</td>
+</tr>
+</tbody>
+</table>
+<p>Powiązane dokumenty: <a href="calibration_manual_pl.html">kalibracja skrętu</a>,
+<a href="protocol.md">protokół komunikacji</a>.</p>
+</body></html>

@@ -1,0 +1,10 @@
+pc_power_monitor:
+  ros__parameters:
+    shutdown_voltage: 0.0  # REQUIRED: depends on battery and NUC supply path.
+    hysteresis_voltage: 0.3
+    low_duration_s: 10.0
+    shutdown_delay_s: 15.0
+    measurement_timeout_s: 2.5
+    diagnostic_name: mtrackercar/serial
+    hardware_id: /dev/ttyUSB0
+    enable_shutdown: false  # Dry-run; no shutdown until explicitly configured.

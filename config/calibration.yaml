@@ -1,0 +1,28 @@
+steering_calibration:
+  ros__parameters:
+    enable_motion: false
+    pose_topic: odom
+    pose_type: odometry  # nav_msgs/Odometry; alternatively pose2d = geometry_msgs/Pose2D.
+    wheel_base: 0.190  # Effective longitudinal bicycle wheelbase, in metres.
+    wheel_radius: 0.033
+    speed: 0.05  # m/s; the driver independently limits calibration to 0.10 m/s.
+    raw_values: [-1.0, -0.80, -0.60, -0.45, -0.30, -0.15, 0.0, 0.15, 0.30, 0.45, 0.60, 0.80, 1.0]
+    repeats: 3  # 13 levels x 2 directions x 3 repeats = 78 measured segments.
+    seed: 7
+    pause_duration: 1.0
+    settle_duration: 1.5
+    measure_duration: 8.0
+    pose_timeout: 0.3
+    min_distance: 0.15
+    max_radius: 2.0
+    max_total_distance: 40.0
+    max_duration: 900.0
+    max_yaw_rms: 0.025
+    max_fit_rmse: 0.04
+    max_direction_difference: 0.06
+    # Pose origin relative to rear-axle midpoint, expressed in body axes:
+    pose_offset_x: 0.0
+    pose_offset_y: 0.0
+    # Orientation reported by pose source minus vehicle heading:
+    pose_yaw_offset: 0.0
+    output_dir: calibration_results

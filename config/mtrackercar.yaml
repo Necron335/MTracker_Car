@@ -1,0 +1,25 @@
+mtrackercar:
+  ros__parameters:
+    serial_port: /dev/ttyUSB0
+    baud_rate: 921600
+    robot_address: 1  # 8-bit ROBOT identifier: match your firmware.
+    command_source: steering_angle  # drive_command: ackermann_msgs/AckermannDriveStamped.
+    steering_mode: angle  # Raw values are allowed only in calibration_raw mode.
+    steering_calibration: [0.0, 1.0, 0.0, 0.0]  # Sent only by calibration service.
+    enable_drive: true
+    wheel_base: 0.190  # Effective bicycle wheelbase: calibrate for your car.
+    wheel_radius: 0.033
+    max_steering_angle: 0.26  # 14.9 deg; within measured range [-0.2630, +0.3289] rad.
+    servo_angle: 1.0471975511965976  # Steering angle corresponding to servo command 1.
+    command_timeout: 0.5
+    response_timeout_ms: 50
+    configuration_timeout_ms: 500  # Configuration replies may take longer than motion replies.
+    command_rate_hz: 100.0
+    odometry_topic: /wheel/odom
+    odom_frame: odom
+    base_frame: base_link
+    pose_sigma_x: 0.01
+    pose_sigma_y: 0.01
+    pose_sigma_theta: 0.02
+    twist_sigma_linear: 0.02
+    twist_sigma_angular: 0.03

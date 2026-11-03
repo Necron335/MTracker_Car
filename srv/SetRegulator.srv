@@ -1,0 +1,10 @@
+# Firmware CMD=4 order. Finite values: feedback 1..200, observer feedback..1000,
+# damping 0.1..5, inertia 0.00001..1.
+float32 feedback_bandwidth
+float32 observer_bandwidth
+float32 damping
+float32 inertia
+---
+bool success
+string message
+float32[4] active_values

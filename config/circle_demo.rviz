@@ -1,0 +1,85 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 35; 35; 35
+    Fixed Frame: odom
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid (10 cm)
+      Enabled: true
+      Cell Size: 0.1
+      Plane Cell Count: 100
+      Color: 100; 100; 100
+    - Class: rviz_default_plugins/Axes
+      Name: Robot pose
+      Enabled: true
+      Reference Frame: base_link
+      Length: 0.1
+      Radius: 0.008
+    - Class: rviz_default_plugins/Path
+      Name: Measured trajectory
+      Enabled: true
+      Topic:
+        Value: /mtrackercar/trajectory
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Color: 0; 255; 120
+      Alpha: 1
+      Buffer Length: 1
+      Line Style: Billboards
+      Line Width: 0.005
+      Pose Style: None
+    - Class: rviz_default_plugins/Path
+      Name: Reference circle (feedback)
+      Enabled: true
+      Topic:
+        Value: /mtrackercar/reference_path
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Color: 255; 180; 0
+      Alpha: 1
+      Buffer Length: 1
+      Line Style: Billboards
+      Line Width: 0.003
+      Pose Style: None
+    - Class: rviz_default_plugins/Pose
+      Name: Reference pose (feedback)
+      Enabled: true
+      Topic:
+        Value: /mtrackercar/reference_pose
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Shape: Arrow
+      Color: 255; 180; 0
+      Alpha: 1
+      Shaft Length: 0.05
+      Shaft Radius: 0.004
+      Head Length: 0.02
+      Head Radius: 0.01
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Top view
+      Target Frame: base_link
+      Scale: 600
+      Angle: 0
+      X: 0
+      Y: 0
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+Window Geometry:
+  Width: 1100
+  Height: 800

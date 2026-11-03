@@ -1,0 +1,63 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 35; 35; 35
+    Fixed Frame: odom
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid (5 cm)
+      Enabled: true
+      Reference Frame: compact_demo_start
+      Cell Size: 0.05
+      Plane Cell Count: 30
+      Color: 100; 100; 100
+    - Class: rviz_default_plugins/Axes
+      Name: Measured robot orientation
+      Enabled: true
+      Reference Frame: base_link
+      Length: 0.12
+      Radius: 0.004
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Schematic robot and commanded steering
+      Enabled: true
+      Marker Topic:
+        Value: /compact_demo/markers
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+        Depth: 10
+    - Class: rviz_default_plugins/Path
+      Name: Measured trajectory
+      Enabled: true
+      Topic:
+        Value: /compact_demo/trajectory
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+      Color: 0; 255; 120
+      Alpha: 1
+      Buffer Length: 1
+      Line Style: Billboards
+      Line Width: 0.004
+      Pose Style: None
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: Close fixed view
+      Target Frame: compact_demo_start
+      Scale: 900
+      Angle: 0
+      X: 0
+      Y: 0
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+Window Geometry:
+  Width: 1100
+  Height: 800
